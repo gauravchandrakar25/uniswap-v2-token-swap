@@ -171,25 +171,25 @@ const swaptoken = async () => {
 
     const gasPrice = await web3.eth.getGasPrice();
 
-    const daiFunctionData = DAI_CONTRACT.methods
-      .approve(UNISWAP_ROUTER_CONTRACT_ADDRESS, amountOutMinBN)
-      .encodeABI();
+    // const daiFunctionData = DAI_CONTRACT.methods
+    //   .approve(UNISWAP_ROUTER_CONTRACT_ADDRESS, amountOutMinBN)
+    //   .encodeABI();
 
-    const txDai = {
-      to: DAI.address,
-      gas: 200000,
-      gasPrice: gasPrice,
-      data: daiFunctionData,
-      nonce: nonce,
-    };
+    // const txDai = {
+    //   to: DAI.address,
+    //   gas: 200000,
+    //   gasPrice: gasPrice,
+    //   data: daiFunctionData,
+    //   nonce: nonce,
+    // };
 
-    const signedTxDai = await web3.eth.accounts.signTransaction(
-      txDai,
-      `0x${PRIVATE_KEY}`
-    );
-    const receiptDai = await web3.eth.sendSignedTransaction(
-      signedTxDai.rawTransaction
-    );
+    // const signedTxDai = await web3.eth.accounts.signTransaction(
+    //   txDai,
+    //   `0x${PRIVATE_KEY}`
+    // );
+    // const receiptDai = await web3.eth.sendSignedTransaction(
+    //   signedTxDai.rawTransaction
+    // );
 
     const usdcFunctionData = USDC_CONTRACT.methods
       .approve(UNISWAP_ROUTER_CONTRACT_ADDRESS, amountIn)
@@ -197,7 +197,7 @@ const swaptoken = async () => {
 
     const txUSDC = {
       to: USDC.address,
-      gas: 200000,
+      gas: 900000,
       gasPrice: gasPrice,
       data: usdcFunctionData,
       nonce: nonce,
@@ -245,7 +245,7 @@ const swaptoken = async () => {
   } catch (error) {
     console.log("-".repeat(45));
     console.log("error", error);
-    console.error("Error during token swap:", error.code);
+    console.error("Error during token swap:", error.message);
     console.log("-".repeat(45));
   }
 };
