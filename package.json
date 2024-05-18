@@ -10,9 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@uniswap/sdk": "^3.0.3",
+    "@uniswap/sdk-core": "^5.0.0",
+    "@uniswap/v2-sdk": "^4.3.2",
     "dotenv": "^16.4.5",
-    "ethers": "^6.12.1",
+    "ethers": "5.7",
     "web3": "^4.8.0"
   }
 }
