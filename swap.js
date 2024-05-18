@@ -14,6 +14,21 @@ const uniswapV2poolABI = require("./uniswapV2poolABI.json");
 const uniswapV2RouterABI = require("./IUniswapV2Router02.json");
 const usdcABI = require("./usdcABI.json");
 const daiABI = require("./daiABI.json");
+const { Web3 } = require("web3");
+
+//provider
+const INFURA_API_KEY = process.env.INFURA_API_KEY;
+const PRIVATE_KEY = process.env.PRIVATE_KEY;
+
+if (!INFURA_API_KEY || !PRIVATE_KEY) {
+  console.error("Missing INFURA_API_KEY or PRIVATE_KEY in .env file");
+  process.exit(1);
+}
+
+const httpProvider = new Web3.providers.HttpProvider(
+  `https://mainnet.infura.io/v3/${INFURA_API_KEY}`
+);
+const web3 = new Web3(httpProvider);
 
 const chainId = ChainId.MAINNET;
 const tokenAddress = "0x6B175474E89094C44Da98b954EedeAC495271d0F"; // must be checksummed
@@ -30,15 +45,6 @@ const USDC = new Token(
 
 const UNISWAP_ROUTER_CONTRACT_ADDRESS =
   "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-
-//provider
-const INFURA_API_KEY = process.env.INFURA_API_KEY;
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
-
-if (!INFURA_API_KEY || !PRIVATE_KEY) {
-  console.error("Missing INFURA_API_KEY or PRIVATE_KEY in .env file");
-  process.exit(1);
-}
 
 // Initialize provider and wallet correctly
 const provider = new ethers.providers.JsonRpcProvider(
@@ -135,32 +141,9 @@ const swaptoken = async () => {
       CurrencyAmount.fromRawAmount(token0, reserve0),
       CurrencyAmount.fromRawAmount(token1, reserve1)
     );
-
-    const route = new Route([pair], USDC, DAI);
-    const signer = wallet.provider.getSigner(wallet.address);
-
     const amountIn = "1000000"; // 1 USDC
 
-    const USDC_CONTRACT = new ethers.Contract(USDC.address, usdcABI, signer);
-    const DAI_CONTRACT = new ethers.Contract(DAI.address, daiABI, signer);
-
-    const UNISWAP_ROUTER_CONTRACT = new ethers.Contract(
-      UNISWAP_ROUTER_CONTRACT_ADDRESS,
-      uniswapV2RouterABI,
-      signer
-    );
-
-    const allowance = await USDC_CONTRACT.allowance(
-      wallet.address,
-      UNISWAP_ROUTER_CONTRACT_ADDRESS
-    );
-    if (allowance.lt(amountInMax)) {
-      const tx = await USDC_CONTRACT.approve(
-        UNISWAP_ROUTER_CONTRACT_ADDRESS,
-        amountIn
-      );
-      await tx.wait();
-    }
+    const route = new Route([pair], USDC, DAI);
 
     const trade = new Trade(
       route,
@@ -168,40 +151,94 @@ const swaptoken = async () => {
       TradeType.EXACT_INPUT
     );
 
-    const slippageTolerance = new Percent("50", "10000"); // 50 bips, or 0.50%
+    const slippageTolerance = new Percent("5", "100");
     const amountOutMin = trade.minimumAmountOut(slippageTolerance).toExact(); // needs to be converted to e.g. decimal string
-    const amountOutMinBN = ethers.utils.parseUnits(amountOutMin, 18);
+    const amountOutMinBN = web3.utils.toWei(amountOutMin, "ether");
 
-    const path = [USDC.address, DAI.address];
-    const to = "0xeE649189671c873962cb729A300DD9855CB6ACc8"; // should be a checksummed recipient address
-    const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from the current Unix time
+    const DAI_CONTRACT = new web3.eth.Contract(daiABI, DAI.address);
+    const USDC_CONTRACT = new web3.eth.Contract(usdcABI, USDC.address);
 
-    const rawTxn = await UNISWAP_ROUTER_CONTRACT.swapTokensForExactTokens(
-      amountIn,
-      amountOutMinBN,
-      path,
-      to,
-      deadline
+    const UNISWAP_ROUTER_CONTRACT = new web3.eth.Contract(
+      uniswapV2RouterABI,
+      UNISWAP_ROUTER_CONTRACT_ADDRESS
     );
 
-    const sendTxn = await wallet.sendTransaction(rawTxn);
+    const senderAccount = web3.eth.accounts.privateKeyToAccount(
+      `0x${PRIVATE_KEY}`
+    );
 
-    const receipt = await sendTxn.wait();
+    const nonce = await web3.eth.getTransactionCount(senderAccount.address);
+
+    const gasPrice = await web3.eth.getGasPrice();
+
+    const daiFunctionData = DAI_CONTRACT.methods
+      .approve(UNISWAP_ROUTER_CONTRACT_ADDRESS, amountOutMinBN)
+      .encodeABI();
+
+    const txDai = {
+      to: DAI.address,
+      gas: 200000,
+      gasPrice: gasPrice,
+      data: daiFunctionData,
+      nonce: nonce,
+    };
+
+    const signedTxDai = await web3.eth.accounts.signTransaction(
+      txDai,
+      `0x${PRIVATE_KEY}`
+    );
+    const receiptDai = await web3.eth.sendSignedTransaction(
+      signedTxDai.rawTransaction
+    );
+
+    const usdcFunctionData = USDC_CONTRACT.methods
+      .approve(UNISWAP_ROUTER_CONTRACT_ADDRESS, amountIn)
+      .encodeABI();
+
+    const txUSDC = {
+      to: USDC.address,
+      gas: 200000,
+      gasPrice: gasPrice,
+      data: usdcFunctionData,
+      nonce: nonce,
+    };
+
+    const signedTxUsdc = await web3.eth.accounts.signTransaction(
+      txUSDC,
+      `0x${PRIVATE_KEY}`
+    );
+    const receiptUsdc = await web3.eth.sendSignedTransaction(
+      signedTxUsdc.rawTransaction
+    );
+
+    const path = [USDC.address, DAI.address];
+    const to = wallet.address; // should be a checksummed recipient address
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from the current Unix time
+
+    const swapFunctionData = UNISWAP_ROUTER_CONTRACT.methods
+      .swapExactTokensForTokens(amountIn, amountOutMinBN, path, to, deadline)
+      .encodeABI();
+
+    const tx = {
+      to: UNISWAP_ROUTER_CONTRACT_ADDRESS,
+      gas: 200000,
+      gasPrice: gasPrice,
+      data: swapFunctionData,
+      nonce: nonce,
+    };
+    const signedTx = await web3.eth.accounts.signTransaction(
+      tx,
+      `0x${PRIVATE_KEY}`
+    );
+    const receipt = await web3.eth.sendSignedTransaction(
+      signedTx.rawTransaction
+    );
 
     if (receipt) {
-      console.log(
-        " - Transaction is mined - \n" +
-          "Transaction Hash: " +
-          sendTxn.hash +
-          "\n" +
-          "Block Number: " +
-          receipt.blockNumber +
-          "\n" +
-          sendTxn.hash +
-          "to see your transaction"
-      );
       console.log("-".repeat(45));
       console.log("Swapping successful");
+      console.log("Visit etherscan to check the transaction");
+      console.log("Transaction hash:", receipt.transactionHash);
     } else {
       console.log("Error submitting transaction");
     }
