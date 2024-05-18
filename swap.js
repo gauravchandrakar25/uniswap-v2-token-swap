@@ -12,6 +12,8 @@ const {
 const { Pair, Route, Trade, Fetcher } = require("@uniswap/v2-sdk");
 const uniswapV2poolABI = require("./uniswapV2poolABI.json");
 const uniswapV2RouterABI = require("./IUniswapV2Router02.json");
+const usdcABI = require("./usdcABI.json");
+const daiABI = require("./daiABI.json");
 
 const chainId = ChainId.MAINNET;
 const tokenAddress = "0x6B175474E89094C44Da98b954EedeAC495271d0F"; // must be checksummed
@@ -25,13 +27,6 @@ const USDC = new Token(
   "USDC",
   "USDC Stablecoin"
 );
-
-// USDC Eth Sepolia 0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
-// DAI Sepolia 0xff34b3d4aee8ddcd6f9afffb6fe49bd371b8a357
-// WETH Sepolia 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14
-// Uniswap V2 Router sepolia 0x425141165d3DE9FEC831896C016617a52363b687
-
-// USDC Mainnet 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 const UNISWAP_ROUTER_CONTRACT_ADDRESS =
   "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
@@ -114,10 +109,10 @@ const createPairUSDC = async () => {
   return pair;
 };
 
-createPairUSDC();
-
 const swaptoken = async () => {
   try {
+    console.log("Token swap started");
+
     const pairAddress = Pair.getAddress(DAI, USDC);
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
 
@@ -144,13 +139,29 @@ const swaptoken = async () => {
     const route = new Route([pair], USDC, DAI);
     const signer = wallet.provider.getSigner(wallet.address);
 
+    const amountIn = "1000000"; // 1 USDC
+
+    const USDC_CONTRACT = new ethers.Contract(USDC.address, usdcABI, signer);
+    const DAI_CONTRACT = new ethers.Contract(DAI.address, daiABI, signer);
+
     const UNISWAP_ROUTER_CONTRACT = new ethers.Contract(
       UNISWAP_ROUTER_CONTRACT_ADDRESS,
       uniswapV2RouterABI,
       signer
     );
 
-    const amountIn = "1000000"; // 1 USDC
+    const allowance = await USDC_CONTRACT.allowance(
+      wallet.address,
+      UNISWAP_ROUTER_CONTRACT_ADDRESS
+    );
+    if (allowance.lt(amountInMax)) {
+      const tx = await USDC_CONTRACT.approve(
+        UNISWAP_ROUTER_CONTRACT_ADDRESS,
+        amountIn
+      );
+      await tx.wait();
+    }
+
     const trade = new Trade(
       route,
       CurrencyAmount.fromRawAmount(USDC, amountIn),
@@ -162,17 +173,16 @@ const swaptoken = async () => {
     const amountOutMinBN = ethers.utils.parseUnits(amountOutMin, 18);
 
     const path = [USDC.address, DAI.address];
-    const to = wallet.address; // should be a checksummed recipient address
+    const to = "0xeE649189671c873962cb729A300DD9855CB6ACc8"; // should be a checksummed recipient address
     const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from the current Unix time
 
-    const rawTxn =
-      await UNISWAP_ROUTER_CONTRACT.populateTransaction.swapTokensForExactTokens(
-        amountIn,
-        amountOutMinBN,
-        path,
-        to,
-        deadline
-      );
+    const rawTxn = await UNISWAP_ROUTER_CONTRACT.swapTokensForExactTokens(
+      amountIn,
+      amountOutMinBN,
+      path,
+      to,
+      deadline
+    );
 
     const sendTxn = await wallet.sendTransaction(rawTxn);
 
@@ -187,16 +197,26 @@ const swaptoken = async () => {
           "Block Number: " +
           receipt.blockNumber +
           "\n" +
-          "Navigate to https://rinkeby.etherscan.io/txn/" +
           sendTxn.hash +
-          " to see your transaction"
+          "to see your transaction"
       );
+      console.log("-".repeat(45));
+      console.log("Swapping successful");
     } else {
       console.log("Error submitting transaction");
     }
   } catch (error) {
-    console.error("Error during token swap:", error);
+    console.log("-".repeat(45));
+    console.log("error", error);
+    console.error("Error during token swap:", error.code);
+    console.log("-".repeat(45));
   }
 };
 
-swaptoken();
+const callFunctions = async () => {
+  await createPairUSDC();
+
+  await swaptoken();
+};
+
+callFunctions();
